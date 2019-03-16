@@ -66,9 +66,6 @@ class Layer(object):
             self.weights, self.biases = optimizer.update_weights(
                 self.weights, self.biases, self.delta_w, self.delta_b, mini_batch_data_size, training_size, regularization)
 
-    def get_weights(self):
-        if self.trainable:
-            pass
             
 
 class ConvLayer(Layer):
@@ -212,3 +209,94 @@ class FullConnectedLayer(Layer):
         self.delta_b = np.dot(np.ones((1, num_batches)), delta)
         data_out = data_out.reshape(self.data_in_shape_for_backprop)
         return data_out
+
+class RecurrentLayer(Layer):
+    def __init__(self, in_neurons, state_neurons, out_neurons, activation = []):
+        self.in_neurons, self.state_neurons, self.out_neurons = in_neurons, state_neurons, out_neurons
+        weights_shape = [(in_neurons, state_neurons), (state_neurons, state_neurons), (state_neurons, out_neurons)]
+        biases_shape = [(1, state_neurons), (1, out_neurons)]
+        super().__init__(weights_shape, biases_shape, activation = [Tanh, Tanh])
+        self.state = np.zeros((1, state_neurons))
+
+    def _feedforward(self, data_in, in_back_propogation = False):
+        # data_in: shape (num_batches, in_neurons)
+        in_weights, state_weights, out_weights = self.weights
+        state_biases, out_biases = self.biases
+        state_activation, out_activation = self.activation
+        new_state = np.dot(data_in, in_weights) + np.dot(self.state, state_weights) + state_biases
+        # state: shape (num_batches, state_neurons)
+        self.state = state_activation.f(new_state)
+        data_out = np.dot(self.state, out_weights) + out_biases
+        data_out = out_activation.f(data_out)
+        # data_out: shape (num_batches, out_neurons)
+        return data_out, self.state
+
+    def feedforward(self, data_in, in_back_propogation = False):
+        # data_in: shape (num_batches, num_recur, in_neurons)
+        num_batches, num_recur, in_neurons = data_in.shape
+        assert in_neurons == self.in_neurons, 'invalid in_neurons'
+        data_in = np.transpose(data_in, axes = [1, 0, 2])
+        data_out = np.zeros((num_recur, num_batches, self.out_neurons))
+        state = np.zeros((num_recur, num_batches, self.state_neurons))
+        for t in range(num_recur):
+            data_out[t], state[t] = self._feedforward(data_in[t], in_back_propogation = in_back_propogation)
+        if in_back_propogation:
+            self.data_in_for_backprop = data_in
+            self.data_out_for_backprop = data_out
+            self.state_for_backprop = state
+        # data_out: shape (num_batches, num_recur, out_neurons)
+        data_out = np.transpose(data_out, axes = [1, 0, 2])
+        return data_out
+
+    def _back_propogation(self, delta, delta_state, recur_idx):
+        # delta: shape (num_batches, out_neurons)
+        num_batches, out_neurons = delta.shape
+        assert out_neurons == self.out_neurons, 'invalid out_neurons'
+        in_weights, state_weights, out_weights = self.weights
+        state_biases, out_biases = self.biases
+        state_activation, out_activation = self.activation
+        delta *= out_activation.derivative_a(self.data_out_for_backprop[recur_idx])
+        gradient_out_weights = np.dot(self.state_for_backprop[recur_idx].T, delta)
+        gradient_out_biases = np.dot(np.ones((1, num_batches)), delta)
+        # delta_state should add the part back propogated from delta
+        # delta_state: shape (num_batches, state_neurons)
+        delta_state += np.dot(delta, self.out_weights.T)
+        delta_state *= state_activation.derivative_a(self.state_for_backprop[recur_idx])
+        gradient_in_weights = np.dot(self.data_in_for_backprop.T, delta_state)
+        gradient_state_weights = np.dot(self.state_for_backprop[recur_idx-1].T, delta_state)
+        gradient_state_biases = np.dot(np.ones((1, num_batches)), delta_state)
+        # data_out: shape (num_batches, in_neurons)
+        data_out = np.dot(delta_state, self.in_weights.T)
+        # delta_previous_state: shape (num_batches, state_neurons)
+        delta_previous_state = np.dot(delta_state, self.state_weights.T)
+        gradient_weights = [gradient_in_weights, gradient_state_weights, gradient_out_weights]
+        gradient_biases = [gradient_state_biases, gradient_out_biases]
+        return data_out, delta_previous_state, gradient_weights, gradient_biases
+
+    def back_propogation(self, delta):
+        # delta: shape (num_batches, num_recur, out_neurons)
+        num_batches, num_recur, out_neurons = delta.shape
+        assert self.data_out_for_backprop.shape == delta.shape, 'invalid shape'
+        delta_state = np.zeros(num_batches, self.state_neurons)
+        # delta: shape (num_recur, num_batches, out_neurons)
+        delta = np.transpose(delta, axes = [1, 0, 2])
+        # data_out: shape (num_recur, num_batches, in_neurons)
+        data_out = np.zeros((num_recur, num_batches, in_neurons))
+        gradient_weights = []
+        gradient_biases = []
+        for t in range(num_recur)[::-1]:
+            data_out[t], delta_state, gradient_weights_t, gradient_biases_t = self._back_propogation(delta[t], delta_state, t)
+            gradient_weights = [w + w_t for w, w_t in zip(gradient_weights, gradient_weights_t)]
+            gradient_biases = [b + b_t for b, b_t in zip(gradient_biases, gradient_biases_t)]
+        # data_out: shape (num_batches, num_recur, out_neurons)
+        data_out = np.transpose(data_out, axes = [1, 0, 2])
+        return data_out
+
+    def check_backprop(self):
+        pass
+
+
+
+
+
+
