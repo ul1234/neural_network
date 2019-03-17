@@ -8,33 +8,48 @@ from train import *
 ########### weight initialize function ####################
 class Weights(object):
     def __init__(self, w_shape, b_shape):
-        # w_shape: (in_neurons, out_neurons) or (out_depth, in_depth, filter_rows, filter_cols)
+        # w_shape: 
+        # FullConnectedLayer: (in_neurons, out_neurons) 
+        # ConvLayer: (out_depth, in_depth, filter_rows, filter_cols)
+        # RNN Layer: [(in_neurons, state_neurons), (state_neurons, state_neurons), (state_neurons, out_neurons)]
         self.w_shape = w_shape
         self.b_shape = b_shape
         self.set_method()
 
     def set_method(self, method = 'opt', param = []):
+        # method: 'opt', 'const', 'random'
         self.param = param
-        self.init = getattr(self, 'init_{}'.format(method))
+        self.init_weights = getattr(self, 'init_weights_{}'.format(method))
+        self.init_biases = getattr(self, 'init_biases_{}'.format(method))
 
-    def init_opt(self):
-        in_neurons = np.prod(self.w_shape) / np.prod(self.b_shape)
-        weights = np.random.randn(*self.w_shape) / np.sqrt(in_neurons)
-        #biases = np.random.randn(self.w_shape[1], 1)
-        biases = np.zeros(self.b_shape)
+    def init(self):
+        weights = [self.init_weights(w_shape) for w_shape in self.w_shape] \
+            if isinstance(self.w_shape, list) else self.init_weights(self.w_shape)
+        biases = [self.init_biases(b_shape) for b_shape in self.b_shape] \
+            if isinstance(self.b_shape, list) else self.init_biases(self.b_shape)
         return weights, biases
 
-    def init_const(self):
+    def init_weights_opt(self, w_shape):
+        return np.random.randn(*w_shape) / np.sqrt(np.prod(w_shape))
+
+    def init_biases_opt(self, b_shape):
+        return np.zeros(b_shape)
+
+    def init_weights_const(self, w_shape):
         w_const, b_const = self.param[0], self.param[1]
-        weights = w_const * np.ones(self.w_shape)
-        biases = b_const * np.ones(self.b_shape)
-        return weights, biases
+        return w_const * np.ones(w_shape)
 
-    def init_random(self):
+    def init_biases_const(self, b_shape):
+        w_const, b_const = self.param[0], self.param[1]
+        return b_const * np.ones(b_shape)
+
+    def init_weight_random(self, w_shape):
         err = self.param[0]
-        weights = err + np.random.randn(self.w_shape)
-        biases = err + np.random.randn(self.b_shape)
-        return weights, biases
+        return err + np.random.randn(w_shape)
+        
+    def init_biases_random(self, b_shape):
+        err = self.param[0]
+        return err + np.random.randn(b_shape)
 
 
 ########### layer ####################
@@ -64,7 +79,7 @@ class Layer(object):
     def update_weights(self, mini_batch_data_size, training_size, optimizer, regularization = RegularNone()):
         if self.trainable:
             self.weights, self.biases = optimizer.update_weights(
-                self.weights, self.biases, self.delta_w, self.delta_b, mini_batch_data_size, training_size, regularization)
+                self.weights, self.biases, self.gradient_weights, self.gradient_biases, mini_batch_data_size, training_size, regularization)
 
             
 
@@ -116,8 +131,8 @@ class ConvLayer(Layer):
         # delta: 4D matrix, shape (num_batches, out_depth, out_rows, out_cols) -> (b, p, k, l)
         assert self.activation == ReLU, 'only ReLU is supported in convolutional layer now'
         delta[self.data_out_for_backprop <= 0] = 0  # back propogation for ReLU
-        self.delta_b = delta.sum(axis = (0,2,3)).reshape(self.biases.shape)
-        self.delta_w = self._back_conv2d(self.data_in_for_backprop, delta)
+        self.gradient_biases = delta.sum(axis = (0,2,3)).reshape(self.biases.shape)
+        self.gradient_weights = self._back_conv2d(self.data_in_for_backprop, delta)
         pad_rows, pad_cols = self.filter_rows - 1, self.filter_cols - 1
         # delta_pad: (num_batches, out_depth, in_rows + filter_rows -1, in_cols + filter_cols - 1)
         delta_pad = np.pad(delta, ((0, 0), (0, 0), (pad_rows, pad_rows), (pad_cols, pad_cols)), 'constant', constant_values = 0)
@@ -205,17 +220,17 @@ class FullConnectedLayer(Layer):
             delta *= self.activation.derivative_a(self.data_out_for_backprop)
         # data_out: shape (num_batches, in_neurons)
         data_out = np.dot(delta, self.weights.T)
-        self.delta_w = np.dot(self.data_in_for_backprop.T, delta)
-        self.delta_b = np.dot(np.ones((1, num_batches)), delta)
+        self.gradient_weights = np.dot(self.data_in_for_backprop.T, delta)
+        self.gradient_biases = np.dot(np.ones((1, num_batches)), delta)
         data_out = data_out.reshape(self.data_in_shape_for_backprop)
         return data_out
 
 class RecurrentLayer(Layer):
-    def __init__(self, in_neurons, state_neurons, out_neurons, activation = []):
+    def __init__(self, in_neurons, state_neurons, out_neurons, activation = [Tanh, Tanh]):
         self.in_neurons, self.state_neurons, self.out_neurons = in_neurons, state_neurons, out_neurons
         weights_shape = [(in_neurons, state_neurons), (state_neurons, state_neurons), (state_neurons, out_neurons)]
         biases_shape = [(1, state_neurons), (1, out_neurons)]
-        super().__init__(weights_shape, biases_shape, activation = [Tanh, Tanh])
+        super().__init__(weights_shape, biases_shape, activation = activation)
         self.state = np.zeros((1, state_neurons))
 
     def _feedforward(self, data_in, in_back_propogation = False):
@@ -269,9 +284,9 @@ class RecurrentLayer(Layer):
         data_out = np.dot(delta_state, self.in_weights.T)
         # delta_previous_state: shape (num_batches, state_neurons)
         delta_previous_state = np.dot(delta_state, self.state_weights.T)
-        gradient_weights = [gradient_in_weights, gradient_state_weights, gradient_out_weights]
-        gradient_biases = [gradient_state_biases, gradient_out_biases]
-        return data_out, delta_previous_state, gradient_weights, gradient_biases
+        gradient_weights_t = [gradient_in_weights, gradient_state_weights, gradient_out_weights]
+        gradient_biases_t = [gradient_state_biases, gradient_out_biases]
+        return data_out, delta_previous_state, gradient_weights_t, gradient_biases_t
 
     def back_propogation(self, delta):
         # delta: shape (num_batches, num_recur, out_neurons)
@@ -282,12 +297,12 @@ class RecurrentLayer(Layer):
         delta = np.transpose(delta, axes = [1, 0, 2])
         # data_out: shape (num_recur, num_batches, in_neurons)
         data_out = np.zeros((num_recur, num_batches, in_neurons))
-        gradient_weights = []
-        gradient_biases = []
+        self.gradient_weights = [np.zeros(w.shape) for w in self.weights]
+        self.gradient_biases = [np.zeros(b.shape) for b in self.biases]
         for t in range(num_recur)[::-1]:
             data_out[t], delta_state, gradient_weights_t, gradient_biases_t = self._back_propogation(delta[t], delta_state, t)
-            gradient_weights = [w + w_t for w, w_t in zip(gradient_weights, gradient_weights_t)]
-            gradient_biases = [b + b_t for b, b_t in zip(gradient_biases, gradient_biases_t)]
+            self.gradient_weights = [w + w_t for w, w_t in zip(self.gradient_weights, gradient_weights_t)]
+            self.gradient_biases = [b + b_t for b, b_t in zip(self.gradient_biases, gradient_biases_t)]
         # data_out: shape (num_batches, num_recur, out_neurons)
         data_out = np.transpose(data_out, axes = [1, 0, 2])
         return data_out

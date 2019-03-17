@@ -126,7 +126,7 @@ if __name__ == '__main__':
     from data_load import DataLoad
     data_load = DataLoad()
 
-    option = 3
+    option = 4
 
     if option == 1:     # all full connected network
         # 50000, 10000, 10000
@@ -166,6 +166,17 @@ if __name__ == '__main__':
                       optimizer = Sgd(0.1),
                       regularization = RegularL2(0.1))
         net.train(training_data, 30, test_data = test_data)
+    elif option == 4:   # RNN
+        training_data, validation_data, test_data = data_load.load_mnist(shape = ((28,28), -1))
+        training_data = training_data[:1000]
+        test_data = test_data[:1000]
+        rnn_layer1 = RecurrentLayer(28, 30, 10)
+        fc_layer1 = FullConnectedLayer((10, 10))
+        net = Network([rnn_layer1, fc_layer1],
+                       cost = CrossEntropy(Sigmoid),
+                       optimizer = Sgd(0.1))
+        net.train(training_data, 30, test_data = test_data)
+
     #net.save('layers_data.txt')
     #net.load('layers_data.txt')
     input('press any key to continue...')
