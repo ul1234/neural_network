@@ -84,10 +84,10 @@ class Layer(object):
     def back_propogation(self, delta):
         raise
 
-    def update_weights(self, mini_batch_data_size, training_size, optimizer, regularization = RegularNone()):
+    def update_weights(self, training_size, optimizer, regularization = RegularNone()):
         if self.trainable:
             self.weights, self.biases = optimizer.update_weights(
-                self.weights, self.biases, self.gradient_weights, self.gradient_biases, mini_batch_data_size, training_size, regularization)
+                self.weights, self.biases, self.gradient_weights, self.gradient_biases, training_size, regularization)
 
 
 class ConvLayer(Layer):
@@ -139,9 +139,10 @@ class ConvLayer(Layer):
         assert delta.shape == self.data_out_for_backprop.shape, 'invalid shape'
         # delta: 4D matrix, shape (num_batches, out_depth, out_rows, out_cols) -> (b, p, k, l)
         assert self.activation == ReLU, 'only ReLU is supported in convolutional layer now'
+        num_batches = delta.shape[0]
         delta[self.data_out_for_backprop <= 0] = 0  # back propogation for ReLU
-        self.gradient_biases = delta.sum(axis = (0,2,3)).reshape(self.biases.shape)
-        self.gradient_weights = self._back_conv2d(self.data_in_for_backprop, delta)
+        self.gradient_biases = delta.sum(axis = (0,2,3)).reshape(self.biases.shape) / num_batches
+        self.gradient_weights = self._back_conv2d(self.data_in_for_backprop, delta) / num_batches
         pad_rows, pad_cols = self.filter_rows - 1, self.filter_cols - 1
         # delta_pad: (num_batches, out_depth, in_rows + filter_rows -1, in_cols + filter_cols - 1)
         delta_pad = np.pad(delta, ((0, 0), (0, 0), (pad_rows, pad_rows), (pad_cols, pad_cols)), 'constant', constant_values = 0)
@@ -224,8 +225,8 @@ class FullConnectedLayer(Layer):
             delta *= self.activation.derivative_a(self.data_out_for_backprop)
         # data_out: shape (num_batches, in_neurons)
         data_out = np.dot(delta, self.weights.T)
-        self.gradient_weights = np.dot(self.data_in_for_backprop.T, delta)
-        self.gradient_biases = np.dot(np.ones((1, num_batches)), delta)
+        self.gradient_weights = np.dot(self.data_in_for_backprop.T, delta) / num_batches
+        self.gradient_biases = np.dot(np.ones((1, num_batches)), delta) / num_batches
         data_out = data_out.reshape(self.data_in_shape_for_backprop)
         return data_out
 
@@ -256,12 +257,12 @@ class RecurrentLayer(Layer):
         num_batches, num_recur, in_neurons = data_in.shape
         assert in_neurons == self.in_neurons, 'invalid in_neurons'
         # reset state to zeros
-        self.state = np.zeros((1, self.state_neurons))
+        self.state = np.zeros((num_batches, self.state_neurons))
         data_in = np.transpose(data_in, axes = [1, 0, 2])
         data_out = np.zeros((num_recur, num_batches, self.out_neurons))
-        state = np.zeros((num_recur, num_batches, self.state_neurons))
+        state = np.zeros((num_recur+1, num_batches, self.state_neurons))
         for t in range(num_recur):
-            data_out[t], state[t] = self._feedforward(data_in[t], in_back_propogation = in_back_propogation)
+            data_out[t], state[t+1] = self._feedforward(data_in[t], in_back_propogation = in_back_propogation)
         if self.only_use_last_output_t: data_out = data_out[-1] # data_out: shape (num_batches, out_neurons)
         if in_back_propogation:
             self.data_in_for_backprop = data_in
@@ -289,16 +290,16 @@ class RecurrentLayer(Layer):
                 # if the last layer, delta is actually the labelled data, i.e. y
                 delta = self.cost_func.delta(self.data_out_for_backprop, delta)
             else:
-                delta *= out_activation.derivative_a(self.data_out_for_backprop[data_out_recur_idx])
-            gradient_out_weights = np.dot(self.state_for_backprop[recur_idx].T, delta)
-            gradient_out_biases = np.dot(np.ones((1, num_batches)), delta)
+                delta *= out_activation.derivative_a(self.data_out_for_backprop)
+            gradient_out_weights = np.dot(self.state_for_backprop[recur_idx+1].T, delta) / num_batches
+            gradient_out_biases = np.dot(np.ones((1, num_batches)), delta) / num_batches
             # delta_state should add the part back propogated from delta
             # delta_state: shape (num_batches, state_neurons)
             delta_state += np.dot(delta, out_weights.T)
-        delta_state *= state_activation.derivative_a(self.state_for_backprop[recur_idx])
-        gradient_in_weights = np.dot(self.data_in_for_backprop[recur_idx].T, delta_state)
-        gradient_state_weights = np.dot(self.state_for_backprop[recur_idx-1].T, delta_state)
-        gradient_state_biases = np.dot(np.ones((1, num_batches)), delta_state)
+        delta_state *= state_activation.derivative_a(self.state_for_backprop[recur_idx+1])
+        gradient_in_weights = np.dot(self.data_in_for_backprop[recur_idx].T, delta_state) / num_batches
+        gradient_state_weights = np.dot(self.state_for_backprop[recur_idx].T, delta_state) / num_batches
+        gradient_state_biases = np.dot(np.ones((1, num_batches)), delta_state) / num_batches
         # data_out: shape (num_batches, in_neurons)
         data_out = np.dot(delta_state, in_weights.T)
         # delta_previous_state: shape (num_batches, state_neurons)

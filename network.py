@@ -35,9 +35,9 @@ class Network(object):
             delta = layer.back_propogation(delta)
         return delta
 
-    def update_weights(self, mini_batch_data_size, training_size):
+    def update_weights(self, training_size):
         for layer in self.layers:
-            layer.update_weights(mini_batch_data_size, training_size, self.optimizer, self.regularization)
+            layer.update_weights(training_size, self.optimizer, self.regularization)
 
     @classmethod
     def unpack_data(cls, packed_data):
@@ -56,7 +56,7 @@ class Network(object):
         batch_input_data, batch_label_data = self.unpack_data(batch_data)
         self.feedforward(batch_input_data, in_back_propogation = True)
         self.back_propogation(batch_label_data)
-        self.update_weights(len(batch_data), training_size)
+        self.update_weights(training_size)
 
     def train(self, training_data, mini_batch_size, test_data = []):
         def print_training_info(test_data_accuracy = None):
@@ -176,14 +176,14 @@ if __name__ == '__main__':
         net.train(training_data, 30, test_data = test_data)
     elif option == 4:   # RNN
         training_data, validation_data, test_data = data_load.load_mnist(shape = ((28,28), -1))
-        training_data = training_data[:1000]
-        test_data = test_data[:1000]
-        rnn_layer1 = RecurrentLayer(28, 30, 10)
-        #fc_layer1 = FullConnectedLayer((10, 10))
-        net = Network(#[rnn_layer1, fc_layer1],
-                       [rnn_layer1],
+        training_data = training_data[:5000]
+        test_data = test_data[:5000]
+        rnn_layer1 = RecurrentLayer(28, 50, 50)
+        fc_layer1 = FullConnectedLayer((50, 10))
+        net = Network([rnn_layer1, fc_layer1],
+                       #[rnn_layer1],
                        cost = CrossEntropy(Sigmoid),
-                       optimizer = Sgd(0.1))
+                       optimizer = Sgd(0.01))
         net.train(training_data, 30, test_data = test_data)
 
     #net.save('layers_data.txt')
