@@ -18,6 +18,10 @@ class Network(object):
         self.regularization = regularization
         self.stop = EarlyStop(10)
 
+    def network_info(self):
+        layers_name = [layer.__class__.__name__ for layer in self.layers]
+        return 'Layers: {}'.format(layers_name)
+
     def set_stop(self, stop = EarlyStop(10)):
         self.stop = stop
 
@@ -37,10 +41,13 @@ class Network(object):
 
     @classmethod
     def unpack_data(cls, packed_data):
-        num_batches = len(packed_data)
         data_x = np.array([x for x, y in packed_data])
         data_y = np.array([y for x, y in packed_data])
         return (data_x, data_y)
+        
+    @classmethod
+    def pack_data(cls, input_data, label_data):
+        return list(zip(input_data, label_data))
 
     def train_batch(self, batch_data, training_size):
         # batch_data: [(x, y), (x, y) ... ]
@@ -62,6 +69,7 @@ class Network(object):
             else:
                 print('epoch %d: cost %.3f training accuracy %.2f%%, elapsed: %.1fs' \
                     % (print_training_info.training_epoch, training_data_cost, 100*training_data_accuracy, time.time() - time_start))
+        print(self.network_info())
         #self.ready_for_train()
         # training_data, [(x0, y0), (x1, y1), ...]
         training_size = len(training_data)
@@ -83,7 +91,7 @@ class Network(object):
         data_out = self.feedforward(input_data)
         cost = self.cost_func.cost(data_out, label_data)
         num_pass = (np.argmax(data_out, axis = 1) == np.argmax(label_data, axis = 1)).sum()
-        accuracy = num_pass * 1.0 / len(test_data)
+        accuracy = num_pass * 1.0 / len(data_in)
         return (accuracy, cost)
 
     def get_layers_data(self):
@@ -153,8 +161,8 @@ if __name__ == '__main__':
         net.train(training_data, 30, test_data = test_data)
     elif option == 3:   # deeper CNN
         training_data, validation_data, test_data = data_load.load_mnist(shape = ((1,28,28), -1))
-        #training_data = training_data[:1000]
-        #test_data = test_data[:1000]
+        training_data = training_data[:1000]
+        test_data = test_data[:1000]
         conv_layer1 = ConvLayer((16, 1, 5, 5))  # output 24*24*16
         pooling_layer1 = PoolingLayer() # output 12*12*16
         conv_layer2 = ConvLayer((32, 16, 3, 3))  # output 10*10*32
@@ -171,8 +179,9 @@ if __name__ == '__main__':
         training_data = training_data[:1000]
         test_data = test_data[:1000]
         rnn_layer1 = RecurrentLayer(28, 30, 10)
-        fc_layer1 = FullConnectedLayer((10, 10))
-        net = Network([rnn_layer1, fc_layer1],
+        #fc_layer1 = FullConnectedLayer((10, 10))
+        net = Network(#[rnn_layer1, fc_layer1],
+                       [rnn_layer1],
                        cost = CrossEntropy(Sigmoid),
                        optimizer = Sgd(0.1))
         net.train(training_data, 30, test_data = test_data)

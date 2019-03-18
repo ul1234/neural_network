@@ -10,6 +10,103 @@ from network import *
 # This file do not work now after the network codes are refactored
 # todo later to make it work
 
+class TestNetwork(unittest.TestCase):
+    def setUp(self):
+        pass
+
+    def tearDown(self):
+        pass
+        
+    def xx_test_FullConnected(self):
+        fc_layer = FullConnectedLayer([3, 2])
+        net = Network([fc_layer],
+                       cost = CrossEntropy(Sigmoid),
+                       optimizer = Sgd(0.1))
+        input_data = np.array([0.1, 0.2, 0.3])[np.newaxis, :]
+        label_data = np.array([1,0])[np.newaxis, :]
+        self._gradient_check(net, input_data, label_data)
+        
+    def xx_test_Conv(self):
+        conv_layer = ConvLayer([2,2,3,3])
+        #pooling_layer = PoolingLayer()
+        #self.fc_layer = FcLayer([8, 30, 1])
+        fc_layer = FullConnectedLayer([32, 10])
+        net = Network([conv_layer, fc_layer],
+                       cost = CrossEntropy(Sigmoid),
+                       optimizer = Sgd(0.1))
+        input_data = np.array([0.74341247,  0.47463755,  0.00992929,  0.95730784,  0.20542349,
+                                0.24606582,  0.5627104 ,  0.18438329,  0.89370057,  0.73840308,
+                                0.96136674,  0.19538822,  0.1619067 ,  0.02462808,  0.85983933,
+                                0.92236065,  0.87674389,  0.68733282,  0.4138197 ,  0.41656749,
+                                0.38043692,  0.78814061,  0.30552122,  0.44576086,  0.79040761,
+                                0.78019093,  0.95638804,  0.2221817 ,  0.18427876,  0.53748266,
+                                0.23379542,  0.27326781,  0.14063543,  0.24078563,  0.54046106,
+                                0.09593265]).reshape(1, 6, 6);
+        input_data = np.concatenate((input_data, 1-input_data)).reshape(1, 2, 6, 6)
+        label_data = np.array([1,0,0,0,0,0,0,0,0,0])[np.newaxis, :]
+        self._gradient_check(net, input_data, label_data)
+        
+    def test_RNN(self):
+        rnn_layer1 = RecurrentLayer(2, 3, 2)
+        net = Network(#[rnn_layer1, fc_layer1],
+                       [rnn_layer1],
+                       cost = CrossEntropy(Sigmoid),
+                       optimizer = Sgd(0.1))
+        input_data = np.array([0.1, 0.2])[np.newaxis, np.newaxis, :]
+        label_data = np.array([1, 0])[np.newaxis, :]
+        self._gradient_check(net, input_data, label_data)
+        
+    def _gradient_check(self, net, input_data, label_data):
+        net.feedforward(input_data, in_back_propogation = True)
+        net.back_propogation(label_data)
+        self._calc_gradient(net, net.pack_data(input_data, label_data))
+        for layer in net.layers:
+            if not layer.trainable: continue
+            Debug.print_('layer:',  layer.__class__.__name__, 'gradient_weights:', layer.gradient_weights, 'gradient_weights_est:', layer.gradient_weights_est)
+            np.testing.assert_allclose(layer.gradient_weights, layer.gradient_weights_est, rtol = 1e-3)
+            Debug.print_('layer:',  layer.__class__.__name__, 'gradient_biases:', layer.gradient_biases, 'gradient_biases_est:', layer.gradient_biases_est)
+            np.testing.assert_allclose(layer.gradient_biases, layer.gradient_biases_est, rtol = 1e-3)
+        
+    def _calc_gradient(self, net, pack_data):
+        delta_weights = delta_biases = 0.0001
+        for layer in net.layers:
+            if not layer.trainable: continue
+            weights_list = layer.weights if isinstance(layer.weights, list) else [layer.weights]
+            gradient_weights_est = [np.zeros_like(weights) for weights in weights_list]
+            for weights_list_index, weights in enumerate(weights_list):
+                for weights_index in range(weights.size):
+                    if (Debug.count() == 19):
+                        a = 0
+                    np.ravel(gradient_weights_est[weights_list_index])[weights_index] = self._gradient_weights_est(pack_data, net, weights, weights_index, delta_weights)
+            layer.gradient_weights_est = gradient_weights_est if isinstance(layer.weights, list) else gradient_weights_est[0]
+            # calc biases gradient
+            biases_list = layer.biases if isinstance(layer.biases, list) else [layer.biases]
+            gradient_biases_est = [np.zeros_like(biases) for biases in biases_list]
+            for biases_list_index, biases in enumerate(biases_list):
+                for biases_index in range(biases.size):
+                    np.ravel(gradient_biases_est[biases_list_index])[biases_index] = self._gradient_biases_est(pack_data, net, biases, biases_index, delta_biases)
+            layer.gradient_biases_est = gradient_biases_est if isinstance(layer.biases, list) else gradient_biases_est[0]
+                    
+    def _gradient_weights_est(self, pack_data, net, weights, weights_index, delta_weights):
+        np.ravel(weights)[weights_index] += delta_weights
+        _, cost1 = net.accuracy(pack_data)
+        np.ravel(weights)[weights_index] -= 2*delta_weights
+        _, cost2 = net.accuracy(pack_data)
+        gradient_weights_est = (cost1 - cost2) / (2*delta_weights)  
+        np.ravel(weights)[weights_index] += delta_weights
+        return gradient_weights_est
+                    
+    def _gradient_biases_est(self, pack_data, net, biases, biases_index, delta_biases):
+        np.ravel(biases)[biases_index] += delta_biases
+        _, cost1 = net.accuracy(pack_data)
+        np.ravel(biases)[biases_index] -= 2*delta_biases
+        _, cost2 = net.accuracy(pack_data)
+        gradient_biases_est = (cost1 - cost2) / (2*delta_biases)  
+        np.ravel(biases)[biases_index] += delta_biases
+        return gradient_biases_est
+
+        
+    
 class TestBackProp(object):
     def __init__(self, layers, layer_input_a):
         self.layers = [layers] if not isinstance(layers, list) else layers
@@ -205,7 +302,7 @@ class TestConvLayer(unittest.TestCase):
         test_back_prop = TestBackProp(self.conv_layer, a_input)
         test_back_prop.test(self)
 
-    def test_back_propogation(self):
+    def xx_test_back_propogation(self):
         self.conv_layer = ConvLayer([3,3,2,2])
         #self.pooling_layer = PoolingLayer()
         #self.fc_layer = FcLayer([8, 30, 1])

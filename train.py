@@ -64,6 +64,7 @@ class Dropout(object):
 class Optimizer(object):
     pass
 
+# todo: need change.......
 class MomentumSgd(Optimizer):
     def __init__(self, learning_rate = 0.1, coeffient = 0.5):
         self.learning_rate = learning_rate
@@ -74,9 +75,9 @@ class MomentumSgd(Optimizer):
         self.weights_velocity = [np.zeros((sizes[layer], sizes[layer-1])) for layer in range(1, num_layers)]
         self.biases_velocity = [np.zeros((sizes[layer], 1)) for layer in range(1, num_layers)]
 
-    def update_weights(self, weights, biases, delta_w, delta_b, data_size, total_training_size, regularization = RegularNone()):
-        self.weights_velocity = [self.coeffient * wv - self.learning_rate / data_size * dwv for wv, dwv in zip(self.weights_velocity, delta_w)]
-        self.biases_velocity = [self.coeffient * bv - self.learning_rate / data_size * dbv for bv, dbv in zip(self.biases_velocity, delta_b)]
+    def update_weights(self, weights, biases, gradient_weights, gradient_biases, data_size, total_training_size, regularization = RegularNone()):
+        self.weights_velocity = [self.coeffient * wv - self.learning_rate / data_size * dwv for wv, dwv in zip(self.weights_velocity, gradient_weights)]
+        self.biases_velocity = [self.coeffient * bv - self.learning_rate / data_size * dbv for bv, dbv in zip(self.biases_velocity, gradient_biases)]
         weights = [regularization.update_weights(w, self.learning_rate, total_training_size) + wv for w, wv in zip(weights, self.weights_velocity)]
         biases = [b + bv for b, bv in zip(biases, self.biases_velocity)]
         return weights, biases
@@ -85,10 +86,18 @@ class Sgd(Optimizer):
     def __init__(self, learning_rate = 0.1):
         self.learning_rate = learning_rate
 
-    def update_weights(self, weights, biases, delta_w, delta_b, data_size, total_training_size, regularization = RegularNone()):
-        weights = regularization.update_weights(weights, self.learning_rate, total_training_size) - self.learning_rate / data_size * delta_w
-        biases = biases - self.learning_rate / data_size * delta_b
+    def update_weights(self, weights, biases, gradient_weights, gradient_biases, data_size, total_training_size, regularization = RegularNone()):
+        weights = [self._update_w(w, dw, data_size, total_training_size, regularization) for w, dw in zip(weights, gradient_weights)] \
+            if isinstance(weights, list) else self._update_w(weights, gradient_weights, data_size, total_training_size, regularization)
+        biases = [self._update_b(b, db, data_size, total_training_size, regularization) for b, db in zip(biases, gradient_biases)] \
+            if isinstance(weights, list) else self._update_b(biases, gradient_biases, data_size, total_training_size, regularization)
         return weights, biases
+
+    def _update_w(self, weights, gradient_weights, data_size, total_training_size, regularization):
+        return regularization.update_weights(weights, self.learning_rate, total_training_size) - self.learning_rate / data_size * gradient_weights
+
+    def _update_b(self, biases, gradient_biases, data_size, total_training_size, regularization):
+        return biases - self.learning_rate / data_size * gradient_biases
 
 ########### early stopping ####################
 class EarlyStop(object):

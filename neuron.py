@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-
+from debug import Debug
 
 ########### activation function ####################
 class Activation(object): pass
@@ -71,7 +71,7 @@ class Cost(object):
 
 class Loglikelihood(Cost):
     def cost(self, a, y):
-        return -(y * np.log(a)).sum(axis = 0).mean()
+        return -(y * np.log(a)).sum(axis = 0).sum(axis = 1).mean()
 
     def delta(self, a, y):
         assert self.activation == Softmax, 'only Softmax is supported with Loglikelihood now'
@@ -79,7 +79,7 @@ class Loglikelihood(Cost):
 
 class Quadratic(Cost):
     def cost(self, a, y):
-        return np.square(a - y).mean()
+        return np.square(a - y).sum(axis = 1).mean()
 
     def derivative(self, a, y):
         return (a - y)
@@ -89,7 +89,7 @@ class Quadratic(Cost):
 
 class CrossEntropy(Cost):
     def cost(self, a, y):
-        return -(y * np.log(a) + (1 - y) * np.log(1 - a)).mean()
+        return -(y * np.log(a) + (1 - y) * np.log(1 - a)).sum(axis = 1).mean()
 
     def derivative(self, a, y):
         return (a - y) / ( a * (1 - a))
