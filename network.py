@@ -70,7 +70,6 @@ class Network(object):
                 print('epoch %d: cost %.3f training accuracy %.2f%%, elapsed: %.1fs' \
                     % (print_training_info.training_epoch, training_data_cost, 100*training_data_accuracy, time.time() - time_start))
         print(self.network_info())
-        #self.ready_for_train()
         # training_data, [(x0, y0), (x1, y1), ...]
         training_size = len(training_data)
         time_start = time.time()
@@ -176,17 +175,23 @@ if __name__ == '__main__':
         net.train(training_data, 30, test_data = test_data)
     elif option == 4:   # RNN
         training_data, validation_data, test_data = data_load.load_mnist(shape = ((28,28), -1))
-        training_data = training_data[:5000]
-        test_data = test_data[:5000]
-        rnn_layer1 = RecurrentLayer(28, 50, 50)
-        fc_layer1 = FullConnectedLayer((50, 10))
-        net = Network([rnn_layer1, fc_layer1],
-                       #[rnn_layer1],
-                       cost = CrossEntropy(Sigmoid),
-                       optimizer = Sgd(0.01))
+        #training_data = training_data[:5000]
+        #test_data = test_data[:5000]
+        only_RNN_layer = True
+        if only_RNN_layer:
+            rnn_layer1 = RecurrentLayer(28, 200, 10)
+            net = Network([rnn_layer1],
+                          cost = CrossEntropy(Sigmoid),
+                          optimizer = Sgd(0.01))
+        else:
+            rnn_layer1 = RecurrentLayer(28, 100, 100)
+            fc_layer1 = FullConnectedLayer((100, 10))
+            net = Network([rnn_layer1, fc_layer1],
+                           cost = CrossEntropy(Sigmoid),
+                           optimizer = Sgd(0.01))
         net.train(training_data, 30, test_data = test_data)
 
     #net.save('layers_data.txt')
     #net.load('layers_data.txt')
-    input('press any key to continue...')
+    #input('press any key to continue...')
 

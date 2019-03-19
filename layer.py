@@ -8,18 +8,19 @@ from train import *
 
 ########### weight initialize function ####################
 class Weights(object):
-    def __init__(self, w_shape, b_shape, out_neuron_idx = -1):
+    def __init__(self, w_shape, b_shape, activation, out_neuron_idx = -1):
         # w_shape:
         # FullConnectedLayer: (in_neurons, out_neurons)
         # ConvLayer: (out_depth, in_depth, filter_rows, filter_cols)
         # RNN Layer: [(in_neurons, state_neurons), (state_neurons, state_neurons), (state_neurons, out_neurons)]
         self.w_shape = w_shape
         self.b_shape = b_shape
+        self.activation = activation
         self.set_method()
         # the index of out neuron in shape, used to calcualte the range of initial weights
         self.out_neuron_idx = out_neuron_idx
 
-    def set_method(self, method = 'opt', param = []):
+    def set_method(self, method = 'orthogonal', param = []):
         # method: 'opt', 'const', 'random'
         self.param = param
         self.init_weights = getattr(self, 'init_weights_{}'.format(method))
@@ -31,6 +32,22 @@ class Weights(object):
         biases = [self.init_biases(b_shape) for b_shape in self.b_shape] \
             if isinstance(self.b_shape, list) else self.init_biases(self.b_shape)
         return weights, biases
+
+    def init_weights_orthogonal(self, w_shape):
+        # https://smerity.com/articles/2016/orthogonal_init.html
+        activation = self.activation if isinstance(self.activation, list) else [self.activation]
+        gain = np.sqrt(2) if ReLU in activation else 1.0
+        assert len(w_shape) >= 2, 'invalid w_shape for orthogonal init'
+        flat_shape = (w_shape[0], np.prod(w_shape[1:]))
+        data = np.random.normal(0.0, 1.0, flat_shape)
+        u, sigma, v = np.linalg.svd(data, full_matrices = False)
+        # pick the one with the correct shape
+        q = u if u.shape == flat_shape else v
+        q = q.reshape(w_shape)
+        return gain * q
+
+    def init_biases_orthogonal(self, b_shape):
+        return np.zeros(b_shape)
 
     def init_weights_opt(self, w_shape):
         return np.random.randn(*w_shape) / np.sqrt(np.prod(w_shape) / w_shape[self.out_neuron_idx])
@@ -62,7 +79,7 @@ class Layer(object):
         self.activation = activation
         self.weights_shape = weights_shape
         self.biases_shape = biases_shape
-        if trainable: self.weight_func = Weights(weights_shape, biases_shape, out_neuron_idx = out_neuron_idx)
+        if trainable: self.weight_func = Weights(weights_shape, biases_shape, activation = activation, out_neuron_idx = out_neuron_idx)
         self.init()
         self.is_last_layer = False
 
@@ -230,6 +247,7 @@ class FullConnectedLayer(Layer):
         data_out = data_out.reshape(self.data_in_shape_for_backprop)
         return data_out
 
+# 1) seems using RNN, the state_neurons should be larger. If not, it's hard to train a good performance
 class RecurrentLayer(Layer):
     def __init__(self, in_neurons, state_neurons, out_neurons, only_use_last_output_t = True, activation = [Tanh, Sigmoid]):
         self.in_neurons, self.state_neurons, self.out_neurons = in_neurons, state_neurons, out_neurons
@@ -328,15 +346,20 @@ class RecurrentLayer(Layer):
             data_out[t], delta_state, gradient_weights_t, gradient_biases_t = self._back_propogation(in_delta, delta_state, t)
             self.gradient_weights = [w + w_t for w, w_t in zip(self.gradient_weights, gradient_weights_t)]
             self.gradient_biases = [b + b_t for b, b_t in zip(self.gradient_biases, gradient_biases_t)]
+        self.gradient_clipping()
         # data_out: shape (num_batches, num_recur, out_neurons)
         data_out = np.transpose(data_out, axes = [1, 0, 2])
         return data_out
 
-    def check_backprop(self):
-        pass
-
-
-
-
-
+    def gradient_clipping(self, clipping_value = 10):
+        gradient_w_need_clipping = any([np.any(np.abs(gradient_w) > clipping_value) for gradient_w in self.gradient_weights])
+        gradient_b_need_clipping = any([np.any(np.abs(gradient_b) > clipping_value) for gradient_b in self.gradient_biases])
+        if gradient_w_need_clipping or gradient_b_need_clipping:
+            print('clipping needed. w: {}, b: {}'.format(gradient_w_need_clipping, gradient_b_need_clipping))
+        #for gradient_weights in self.gradient_weights:
+        #    gradient_weights[gradient_weights>clipping_value] = clipping_value
+        #    gradient_weights[gradient_weights<-clipping_value] = -clipping_value
+        #for gradient_biases in self.gradient_biases:
+        #    gradient_biases[gradient_biases>clipping_value] = clipping_value
+        #    gradient_biases[gradient_biases<-clipping_value] = -clipping_value
 
